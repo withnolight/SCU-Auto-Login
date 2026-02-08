@@ -30,12 +30,20 @@
     let password = GM_getValue("scu_password");
     let apiUrl = GM_getValue("scu_api_url");
 
-    if (!username || !password || !apiUrl) {
-      alert("检测到首次运行，请设置您的教务系统账号信息以开启自动填充。");
-      username = prompt("请输入学号:");
-      password = prompt("请输入密码:");
+    const urlParams = new URLSearchParams(window.location.search);
+    const isConfig = urlParams.get("config") === "1";
+
+    if (isConfig || !username || !password || !apiUrl) {
+      alert(
+        isConfig
+          ? "正在重新配置用户信息..."
+          : "检测到首次运行，请设置您的教务系统账号信息以开启自动填充。"
+      );
+      username = prompt("请输入学号:", username || "");
+      password = prompt("请输入密码:", password || "");
       apiUrl = prompt(
-        "请输入 OCR 服务器地址 (例如 http://127.0.0.1:5000/api/ocr):"
+        "请输入 OCR 服务器地址 (例如 http://127.0.0.1:5000/api/ocr):",
+        apiUrl || ""
       );
 
       if (username && password && apiUrl) {
@@ -43,6 +51,10 @@
         GM_setValue("scu_password", password);
         GM_setValue("scu_api_url", apiUrl);
         alert("设置成功！刷新页面即可生效。请同意油猴的跨域请求权限！");
+        if (isConfig) {
+          window.location.search = "";
+          return null;
+        }
       } else {
         alert("取消设置，脚本将不会自动填充。");
       }
