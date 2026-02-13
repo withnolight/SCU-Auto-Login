@@ -20,14 +20,15 @@
 
 后端服务用于识别登录页面的验证码。
 
+0.  目前此项目已经升级为使用 `pixi` 作为版本控制工具，推荐使用 `pixi` 来管理项目依赖和运行环境。如果你还没有安装 `pixi`，请先安装它。[安装教程](https://hellowac.github.io/pixi-zh-cn/#_2)
 1.  克隆或下载本项目。
 2.  安装依赖：
     ```bash
-    pip install -r requirements.txt
+    pixi install
     ```
 3.  启动服务器：
     ```bash
-    python server.py
+    pixi run server
     ```
     服务默认运行在 `http://127.0.0.1:5000`。
 
@@ -62,3 +63,7 @@
 ## 免责声明
 
 本项目仅供学习和交流使用，请勿用于非法用途。使用本工具产生的任何后果由使用者自行承担。
+
+## 题外话
+
+Python 的版本依赖是真的逆天。就算用了`pixi`也是麻烦事一堆。

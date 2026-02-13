@@ -37,6 +37,7 @@ def fix_captcha(raw: str) -> str:
 @app.route('/api/ocr', methods=['POST'])
 def handle_captcha():
     try:
+        print("收到请求，正在处理...", flush=True)
         # 获取 JSON 数据
         data = request.get_json(silent=True)
         if not data or 'image' not in data:
