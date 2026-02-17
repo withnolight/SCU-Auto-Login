@@ -2,6 +2,11 @@
 
 这是一个用于四川大学教务系统的自动登录工具，包含一个基于 `ddddocr` 的验证码识别后端和一个 Tampermonkey 用户脚本。
 
+## 快速安装
+
+[Get on Greasy Fork](https://greasyfork.org/zh-CN/scripts/565585-scu-auto-login)
+
+
 ## 功能特性
 
 - 自动填充学号和密码
