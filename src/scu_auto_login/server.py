@@ -1,78 +1,132 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
 import base64
 import io
+import logging
+import os
 import random
 import string
-import logging
-from PIL import Image
+from typing import Tuple, Dict, Any
+
+from flask import Flask, request, jsonify, Blueprint
+from flask_cors import CORS
+from PIL import Image, UnidentifiedImageError
 import ddddocr
 
-ocr = ddddocr.DdddOcr(show_ad=False)
-ocr.set_ranges(4)
-app = Flask(__name__)
-# 允许跨域请求
-CORS(app)
+# ==========================================
+# Configuration
+# ==========================================
+class Config:
+    HOST = os.getenv("HOST", "0.0.0.0")
+    PORT = int(os.getenv("PORT", 5000))
+    DEBUG = os.getenv("DEBUG", "True").lower() in ("true", "1", "t")
+    CAPTCHA_LENGTH = 4
+    VALID_CHARS = set(string.ascii_lowercase + string.digits)
 
-VALID_CHARS = set(string.ascii_lowercase + string.digits)
-CAPTCHA_LENGTH = 4
+# ==========================================
+# Logging Setup
+# ==========================================
+def setup_logging(debug: bool = False) -> logging.Logger:
+    level = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    # Disable Werkzeug default request logging if not in debug mode
+    if not debug:
+        logging.getLogger("werkzeug").setLevel(logging.ERROR)
+    return logging.getLogger(__name__)
 
-def fix_captcha(raw: str) -> str:
-    """修正验证码结果，确保为4位小写字母+数字"""
-    # 统一转小写
-    raw = raw.lower()
-    # 删去不可能出现的字符
-    filtered = ''.join(c for c in raw if c in VALID_CHARS)
+logger = setup_logging(Config.DEBUG)
 
-    if len(filtered) == CAPTCHA_LENGTH:
-        return filtered
-    elif len(filtered) > CAPTCHA_LENGTH:
-        # 从最前方删去多余字符
-        return filtered[len(filtered) - CAPTCHA_LENGTH:]
-    else:
-        # 在最前方补入随机小写字母
-        padding = ''.join(random.choices(string.ascii_lowercase, k=CAPTCHA_LENGTH - len(filtered)))
-        return padding + filtered
+# ==========================================
+# Services / Business Logic
+# ==========================================
+class OCRService:
+    def __init__(self):
+        logger.info("Initializing OCR Service...")
+        self.ocr = ddddocr.DdddOcr(show_ad=False)
+        self.ocr.set_ranges(4)
 
-@app.route('/api/ocr', methods=['POST'])
-def handle_captcha():
+    def fix_captcha(self, raw: str) -> str:
+        """修正验证码结果，确保为指定长度的小写字母+数字"""
+        raw = raw.lower()
+        filtered = ''.join(c for c in raw if c in Config.VALID_CHARS)
+
+        if len(filtered) == Config.CAPTCHA_LENGTH:
+            return filtered
+        elif len(filtered) > Config.CAPTCHA_LENGTH:
+            return filtered[-Config.CAPTCHA_LENGTH:]
+        else:
+            padding = ''.join(random.choices(string.ascii_lowercase, k=Config.CAPTCHA_LENGTH - len(filtered)))
+            return padding + filtered
+
+    def recognize(self, img_data: bytes) -> str:
+        """识别图片数据并返回修正后的验证码"""
+        raw_result = self.ocr.classification(img_data)
+        result = self.fix_captcha(raw_result)
+        logger.debug(f"OCR Raw: {raw_result} -> Fixed: {result}")
+        return result
+
+# Initialize service globally
+ocr_service = OCRService()
+
+# ==========================================
+# API Routes (Blueprint)
+# ==========================================
+api_bp = Blueprint("api", __name__, url_prefix="/api")
+
+@api_bp.route('/ocr', methods=['POST'])
+def handle_captcha() -> Tuple[Dict[str, Any], int]:
     try:
-        print("收到请求，正在处理...", flush=True)
-        # 获取 JSON 数据
+        logger.info("Received OCR request.")
         data = request.get_json(silent=True)
+        
         if not data or 'image' not in data:
-            return jsonify({"error": "No image data", "status": "fail"}), 400
+            logger.warning("Request missing image data.")
+            return jsonify({"error": "No image data provided", "status": "fail"}), 400
 
-        # 处理 Base64 字符串
-        # 格式通常为: data:image/png;base64,iVBORw0KGgoAAA...
         img_str = data['image']
         if "," in img_str:
-            img_str = img_str.split(",")[1]
+            img_str = img_str.split(",", 1)[1]
 
-        # 解码图片数据
-        img_data = base64.b64decode(img_str)
+        try:
+            img_data = base64.b64decode(img_str)
+        except Exception as e:
+            logger.warning(f"Base64 decode failed: {e}")
+            return jsonify({"error": "Invalid base64 encoding", "status": "fail"}), 400
 
-        # 验证图片数据有效性
-        img = Image.open(io.BytesIO(img_data))
-        img.verify()  # 验证图片是否损坏
+        try:
+            img = Image.open(io.BytesIO(img_data))
+            img.verify()
+        except UnidentifiedImageError:
+            logger.warning("Invalid or corrupted image data.")
+            return jsonify({"error": "Invalid image data", "status": "fail"}), 400
 
-        # 直接使用原始解码后的字节数据进行 OCR 识别
-        raw_result = ocr.classification(img_data)
-        result = fix_captcha(raw_result)
-        #print(f"原始识别: {raw_result} -> 修正结果: {result}")
-
-        # 返回识别结果的 JSON
-        return jsonify({"code": result, "status": "success"})
+        result = ocr_service.recognize(img_data)
+        return jsonify({"code": result, "status": "success"}), 200
 
     except Exception as e:
-        print(f"处理失败: {e}")
-        return jsonify({"error": str(e), "status": "fail"}), 500
+        logger.error(f"Unexpected error during OCR processing: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error", "status": "fail"}), 500
 
+# ==========================================
+# Application Factory
+# ==========================================
+def create_app() -> Flask:
+    app = Flask(__name__)
+    CORS(app)
+    app.register_blueprint(api_bp)
+    
+    @app.route('/health', methods=['GET'])
+    def health_check():
+        """健康检查接口"""
+        return jsonify({"status": "ok"}), 200
+        
+    return app
+
+# ==========================================
+# Entry Point
+# ==========================================
 if __name__ == '__main__':
-    # 禁用 Flask (Werkzeug) 的默认访问日志
-    log = logging.getLogger('werkzeug')
-    log.setLevel(logging.ERROR)
-    # 或者完全禁用：log.disabled = True
-
-    # 运行在本地 5000 端口
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app = create_app()
+    logger.info(f"Starting server on {Config.HOST}:{Config.PORT} (Debug: {Config.DEBUG})")
+    app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG)
