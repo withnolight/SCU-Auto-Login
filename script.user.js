@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SCU-Auto-login
 // @namespace    http://tampermonkey.net/
-// @version      2026-03-14
+// @version      1.1.0
 // @description  快速登录四川大学教务系统！
 // @author       withnolight
 // @match        http://zhjw.scu.edu.cn/login*
